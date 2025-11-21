@@ -15,51 +15,74 @@ const io = new Server(server, {
   }
 });
 
-// 初始状态
 let gameState = {
-  status: 'idle', // idle, drawing, revealed
+  status: 'idle', 
   prizeName: '',
   participants: [],
   winner: null,
-  endTime: null, // 用于倒计时
+  targetTime: null, // 新增：目标开奖时间
 };
 
+let autoDrawTimer = null;
+
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
-  
-  // 客户端连入时，发送当前最新状态
   socket.emit('updateState', gameState);
 
-  // 管理员：更新设置
+  // 管理员更新配置
   socket.on('admin-update-config', (config) => {
+    // 合并配置
     gameState = { ...gameState, ...config };
-    io.emit('updateState', gameState);
-  });
-
-  // 管理员：开始抽奖
-  socket.on('admin-start-draw', () => {
-    if (gameState.participants.length === 0) return;
     
-    gameState.status = 'drawing';
-    gameState.winner = null;
-    io.emit('updateState', gameState);
+    // 如果设置了时间，且时间在未来，则设置服务端自动定时器
+    if (gameState.targetTime) {
+      const delay = new Date(gameState.targetTime).getTime() - new Date().getTime();
+      
+      // 清除旧的定时器
+      if (autoDrawTimer) clearTimeout(autoDrawTimer);
 
-    // 模拟抽奖过程：3.5秒后出结果
-    setTimeout(() => {
-      const randomIndex = Math.floor(Math.random() * gameState.participants.length);
-      gameState.winner = gameState.participants[randomIndex];
-      gameState.status = 'revealed';
-      io.emit('updateState', gameState);
-    }, 3500);
+      if (delay > 0) {
+        console.log(`自动开奖已设定，将在 ${delay / 1000} 秒后触发`);
+        autoDrawTimer = setTimeout(() => {
+          startLottery();
+        }, delay);
+      }
+    }
+
+    io.emit('updateState', gameState);
   });
 
-  // 管理员：重置
+  // 管理员手动触发
+  socket.on('admin-start-draw', () => {
+    startLottery();
+  });
+
   socket.on('admin-reset', () => {
+    if (autoDrawTimer) clearTimeout(autoDrawTimer);
     gameState.status = 'idle';
     gameState.winner = null;
+    gameState.targetTime = null; // 重置时间
     io.emit('updateState', gameState);
   });
 });
+
+// 抽公用函数
+function startLottery() {
+  if (gameState.participants.length === 0 || gameState.status === 'drawing') return;
+  
+  console.log("开始抽奖...");
+  gameState.status = 'drawing';
+  gameState.winner = null;
+  io.emit('updateState', gameState);
+
+  // 3.5秒动画后出结果
+  setTimeout(() => {
+    const randomIndex = Math.floor(Math.random() * gameState.participants.length);
+    gameState.winner = gameState.participants[randomIndex];
+    gameState.status = 'revealed';
+    io.emit('updateState', gameState);
+  }, 3500);
+}
+
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
